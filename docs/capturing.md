@@ -125,6 +125,46 @@ which also shows OHealth's own tags (`oplus.wearable`, `heytap`).
 
 ---
 
+## Capturing the pairing (you get one shot per factory reset)
+
+The pairing/first-sync handshake is the most valuable capture and the hardest
+to repeat — it happens once per factory reset. Prepare so you don't waste it.
+
+**Prepare the phone *before* resetting the watch:**
+
+1. Install OHealth on the phone and sign in, so setup isn't waiting on a download.
+2. Enable Developer options → **Bluetooth HCI snoop log**, then toggle
+   Bluetooth off/on (or reboot) so logging is actually running.
+3. Plug in USB, confirm `adb devices` shows the phone, and start the semantic
+   log in a terminal (the fresh watch has no adb yet, so log the phone):
+   ```sh
+   adb logcat -v time > pairing_logcat.txt &
+   ```
+4. Keep the watch on its charger right next to the phone — a strong link
+   avoids retransmits and keeps traffic on Bluetooth.
+5. To stop anything routing over the cloud, turn the phone's **Wi-Fi off** for
+   the core pairing (mobile data still tethers the watch over Bluetooth).
+   Re-enable Wi-Fi only once setup needs the internet (account copy, OTA).
+
+**Beware the buffer.** The snoop log is a capped ring buffer. A full Wear OS
+setup — Google **account copy**, a **day-zero OTA**, app installs — floods it
+and can evict the early `Connect` / `SyncStart` / `DeviceInfo` frames you most
+want. To protect the handshake:
+
+- If OnePlus lets you **skip or defer the Google account** during setup, do so;
+  that removes the largest flood and isolates the OnePlus `com.op.proto`
+  handshake. Add the account in a later session if you need that flow.
+- **Pull the log as soon as the watch reports "connected / setting up"**, before
+  the OTA. You can continue setup afterward and pull again.
+
+**Then:** note the wall-clock time you tap *Pair*, complete the core pairing,
+and immediately run the wizard (or `adb bugreport`) to grab `btsnoop_hci.log`.
+Decode the `/heytap/watch/ctrl` and `/heytap/phone/ctrl` directions first —
+that is where `DeviceInfo` / `ConnectResult` / `CapabilityHand` ride. Save the
+raw `.bin` files and `pairing_logcat.txt` (scrubbed of personal data).
+
+---
+
 ## What to capture first (most useful, in order)
 
 1. **Pairing / first sync** — the `connect` + `SyncStart` handshake and the
