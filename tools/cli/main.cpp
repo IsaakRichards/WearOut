@@ -14,6 +14,9 @@
 //                                            sit between a real phone and a watch,
 //                                            forward bytes untouched, log decoded traffic
 //   wearout-cli fake-watch [port]            minimal watch impersonator for self-tests
+//   wearout-cli decode <file|->              replay a captured one-direction RFCOMM
+//                                            payload (see docs/capturing.md) and print
+//                                            the decoded messages
 //
 // Interactive commands in `connect` mode (type on stdin):
 //   msg <path> <text>       send a MessageClient message to the watch
@@ -343,12 +346,67 @@ int runFakeWatch(int port) {
     return 0;
 }
 
+// Replay a captured, single-direction RFCOMM payload stream through the
+// decoder. `file` is the raw bytes of one direction of the WearableBt channel
+// (e.g. exported from Wireshark, see docs/capturing.md). "-" reads stdin.
+//
+// Because a capture may begin mid-stream, the decoder can choke on the first
+// bytes; we resync by dropping one byte at a time until framing locks on.
+int runDecode(const char *label, const std::string &file) {
+    Bytes data;
+    if (file == "-") {
+        int c;
+        while ((c = std::getchar()) != EOF)
+            data.push_back(static_cast<uint8_t>(c));
+    } else {
+        FILE *f = std::fopen(file.c_str(), "rb");
+        if (!f) {
+            std::fprintf(stderr, "cannot open %s\n", file.c_str());
+            return 1;
+        }
+        uint8_t buf[65536];
+        size_t n;
+        while ((n = std::fread(buf, 1, sizeof buf, f)) > 0)
+            data.insert(data.end(), buf, buf + n);
+        std::fclose(f);
+    }
+    std::printf("decoding %zu bytes from %s\n", data.size(), file.c_str());
+
+    size_t start = 0, decoded = 0;
+    while (start < data.size()) {
+        StreamDecoder dec;
+        dec.feed(data.data() + start, data.size() - start);
+        bool progressed = false;
+        try {
+            while (auto d = dec.next()) {
+                logMessage(label, d->message, d->raw);
+                progressed = true;
+                ++decoded;
+            }
+            break; // clean end of stream
+        } catch (const FramingError &e) {
+            if (progressed) {
+                // Framing was good then broke: likely a gap in the capture.
+                std::printf("-- framing lost (%s); resyncing\n", e.what());
+            }
+            // Skip ahead to the next plausible frame start and try again.
+            ++start;
+            while (start < data.size() && data[start] != 0x00)
+                ++start; // frame length prefixes for our sizes start with 0x00
+            continue;
+        }
+    }
+    std::printf("-- decoded %zu message(s)\n", decoded);
+    return 0;
+}
+
 void usage() {
     std::fprintf(stderr,
                  "usage:\n"
                  "  wearout-cli [-v] connect [host:port]\n"
                  "  wearout-cli [-v] proxy <listen-port> <host:port>\n"
-                 "  wearout-cli [-v] fake-watch [port]\n");
+                 "  wearout-cli [-v] fake-watch [port]\n"
+                 "  wearout-cli [-v] decode <file|->   replay a captured RFCOMM payload\n");
 }
 
 } // namespace
@@ -370,6 +428,8 @@ int main(int argc, char **argv) {
         return runProxy(std::atoi(argv[i]), argv[i + 1]);
     if (mode == "fake-watch")
         return runFakeWatch(i < argc ? std::atoi(argv[i]) : 5601);
+    if (mode == "decode" && i < argc)
+        return runDecode("cap", argv[i]);
     usage();
     return 2;
 }

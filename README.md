@@ -50,7 +50,7 @@ tests/           unit + loopback tests for the core
 sailfish/        wearoutd (Qt5, BlueZ Profile1 RFCOMM) + Silica UI + systemd user unit
 rpm/             Sailfish SDK spec
 proto/           reference .proto schema (from microG, Apache-2.0)
-docs/            protocol notes, docs/devices/ per-device dossiers
+docs/            protocol notes, capturing guide, docs/devices/ per-device dossiers
 ```
 
 ## Building the core and CLI (any Linux)
@@ -72,6 +72,17 @@ adb -s emulator-5554 forward tcp:5601 tcp:5601
 Type `msg /some/path hello`, `put /some/path value`, `app <package> <digest>`,
 `items` or `quit`. Unknown traffic is dumped as decoded protobuf so new
 fields can be identified. Add `-v` to dump everything.
+
+### Replaying a real capture
+
+Record watchâphone Bluetooth traffic on an Android phone and replay one
+direction through WearOut's own parser:
+
+```sh
+./build/wearout-cli -v decode watch_to_phone.bin
+```
+
+See [docs/capturing.md](docs/capturing.md) for how to capture and export it.
 
 ### Capturing a real phone ↔ watch session
 
