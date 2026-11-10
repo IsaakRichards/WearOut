@@ -15,6 +15,7 @@ add_library(wearout_core STATIC
     core/src/framing.cpp
     core/src/session.cpp
     core/src/devices.cpp
+    core/src/oppo.cpp
 )
 target_include_directories(wearout_core PUBLIC core/include)
 set_target_properties(wearout_core PROPERTIES POSITION_INDEPENDENT_CODE ON)

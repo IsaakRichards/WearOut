@@ -44,6 +44,7 @@ core/            portable C++17 protocol core (no Qt, no libprotobuf)
   framing        length-prefixed pieces, multi-piece reassembly, SHA-1 digest checks
   session        phone-side state machine: handshake, sync, heartbeat, messages
 tools/apk_identity.py  signing-cert digest of an APK (who the watch trusts)
+tools/apk_wear_scan.py scan an APK for its Wear OS interop surface (paths, services, protos)
 tools/cli/       wearout-cli: talk to the Wear OS emulator over TCP, MITM proxy, fake watch
 tests/           unit + loopback tests for the core
 sailfish/        wearoutd (Qt5, BlueZ Profile1 RFCOMM) + Silica UI + systemd user unit
@@ -110,7 +111,8 @@ Amazfish.
 - [x] Device profiles (OnePlus Watch 4), paired-watch discovery, keypad-first UI for the Callback
 - [x] `tools/apk_identity.py`: extract OHealth's signing digest
 - [ ] **Run the CLI against a real Wear OS emulator; record and fix the handshake**
-- [ ] OnePlus Watch 4: OHealth Data Layer paths, then its BLE/RTOS link (see dossier)
+- [x] OnePlus Watch 4: scanned OHealth — it tunnels over the Google Data Layer on `/heytap/*` paths with `com.op.proto` messages; no separate BLE link to reverse (see dossier)
+- [ ] Model the `com.op.proto` handshake messages and relay the `/heytap/*` paths
 - [ ] Capture a full companion setup with the proxy; document every message
 - [ ] First build + run of `wearoutd` on a device
 - [ ] Notifications: mirror Sailfish (lipstick) notifications to the watch

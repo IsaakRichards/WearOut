@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: Apache-2.0
 // Dependency-free unit tests for the WearOut protocol core.
 #include "wearout/devices.h"
+#include "wearout/oppo.h"
 #include "wearout/framing.h"
 #include "wearout/messages.h"
 #include "wearout/protobuf.h"
@@ -305,8 +306,22 @@ static void testDeviceMatching() {
     CHECK(matchWatch("") == nullptr);
 }
 
+static void testOppoPaths() {
+    using namespace wearout::oppo;
+    CHECK(channelOf(kToWatchMessage) == Channel::Message);
+    CHECK(channelOf(kToPhoneCtrl) == Channel::Ctrl);
+    CHECK(channelOf("/heytap/watch/data") == Channel::Data);
+    CHECK(channelOf("/call/rpc/call") == Channel::None);
+    CHECK(isToWatch(kToWatchData));
+    CHECK(!isToWatch(kToPhoneData));
+    CHECK(isOppoPath(kToPhoneMessage));
+    CHECK(!isOppoPath("/random"));
+    CHECK(knownProtoMessages().size() >= 20);
+}
+
 int main() {
     testDeviceMatching();
+    testOppoPaths();
     testSha1();
     testVarints();
     testConnectRoundTrip();

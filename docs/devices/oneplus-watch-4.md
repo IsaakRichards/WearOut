@@ -13,31 +13,66 @@ WearOut's primary target watch.
 | Battery | 632 mAh; ~16 days power-saver, ~5 days "smart mode", ~3 days heavy use |
 | Setup app | **OHealth** (`com.heytap.health.international`) — per OnePlus' Watch 3 FAQ, which also requires Android 9+ and Google Play services ≥ 23.45.23 on the phone. Assumed identical for Watch 4. |
 
-## Why this watch is harder than a Pixel Watch
+## How OHealth actually works (from scanning the APK)
 
-It is really **two computers sharing one Bluetooth radio story**:
+The APK scan (`python3 tools/apk_wear_scan.py OHealth.apks`, full output in
+[ohealth-scan.md](ohealth-scan.md)) settled the architecture, and it is
+friendlier than feared:
 
 ```
-              ┌──────────── OnePlus Watch 4 ────────────┐
- Sailfish ◄──►│ Snapdragon W5: Wear OS 6 + GMS          │  "WearableBt" RFCOMM (Google)
-   phone  ◄──►│ BES2800: RTOS (notifications, health    │  OPPO/HeyTap link (proprietary,
-              │  sensors, watch faces in power-saver)   │   probably BLE) — UNKNOWN
-              └─────────────────────────────────────────┘
+                 ┌──────── OHealth (phone) ────────┐
+                 │ Google Wear Companion Library    │  setup, pairing,
+                 │  (com.google.android.libraries   │  account copy, OTA
+                 │   .wear.companion.*)             │
+                 │ OPPO link layer                  │  all OnePlus features
+                 │  (com.oplus.wearable.linkservice)│  as com.op.proto msgs
+                 └───────────────┬──────────────────┘
+                                 │ ONE Wear OS Data Layer link
+                                 │ (WearableBt RFCOMM — what WearOut speaks)
+                 ┌───────────────┴──────────────────┐
+                 │            OnePlus Watch 4         │
+                 └───────────────────────────────────┘
 ```
 
-1. **The Google side** (W5 / Wear OS) speaks the Wearable protocol WearOut
-   already implements. This carries Data Layer traffic between OHealth on
-   the phone and OHealth's watch-side app.
-2. **The OPPO side** (BES2800) is how OnePlus gets 5–16 day battery life:
-   in smart/power-saver mode Wear OS sleeps and the RTOS handles
-   notifications and sensors. OHealth almost certainly talks to it over a
-   separate proprietary link. **Nothing public documents this yet.**
-3. **Setup is done by OHealth, not Google's Wear OS app.** OHealth wraps
-   Google's setup flow (Google account copy to the watch) inside its own
-   OPPO account + pairing flow.
+Three findings that shape WearOut:
 
-A WearOut that only speaks the Google side would work while the watch is in
-full Wear OS mode and go quiet when it drops to RTOS mode.
+1. **There is one link, not two.** OnePlus's own service,
+   `com.oplus.wearable.linkservice.transport.gms.GMSListenerService`,
+   is a *standard Wear OS `WearableListenerService`*. It does not open a
+   second Bluetooth socket — it tunnels OnePlus's protocol **over the Google
+   Data Layer**, on these path prefixes (from the manifest):
+
+   | Prefix | Direction |
+   |---|---|
+   | `/heytap/watch/message`, `/heytap/watch/data`, `/heytap/watch/ctrl` | phone → watch |
+   | `/heytap/phone/message`, `/heytap/phone/data`, `/heytap/phone/ctrl` | watch → phone |
+
+   So **WearOut's existing transport already carries OnePlus traffic.** The
+   BES2800 co-processor still exists for battery life, but OHealth reaches it
+   through the Data Layer, not a separate app-visible link. These paths and a
+   path classifier are in `core/.../oppo.h`.
+
+2. **OnePlus's payloads are `com.op.proto` protobufs.** 25 message types were
+   recovered by name (listed in `oppo.cpp` and the scan report): the handshake
+   set (`DeviceInfo`, `ConnectResult`, `CapabilityHand`, `CapabilityPass`,
+   `StartSetting`, `SyncOOBEState`, `MigrateStatus`), settings (`TimeFormat`,
+   `NightModeData`, `RaiseWristData`, `StepGoal`, `CalorieGoal`), health
+   (`HeartRateMeasure`, `HeartRateWarn`, `OximetryState`, `ECGMeasureType`),
+   and actions (`FindDeviceProto`, `FindPhoneProto`, `LaunchWatchApp`). Field
+   layouts still need a capture.
+
+3. **Setup is Google's, wrapped by OHealth.** OHealth embeds the Google Wear
+   Companion Library, whose setup engine steps are all present by name
+   (`WatchPairingSetupStep`, `TermsOfServiceSetupStep`,
+   `GoogleAccountsSetupStep`, `FactoryResetProtectionSetupStep`,
+   `GmsCheckInSetupStep`, `PhoneSwitchingSetupStep`, `RestoreSetupStep`, …).
+   This is the **same companion flow microG is working to support** (GmsCore
+   PRs #3837/#3849), so that work applies directly here.
+
+**What this means:** a WearOut that speaks the Google Data Layer well enough
+to (a) complete the companion setup and (b) relay `com.op.proto` messages on
+the six `/heytap/*` paths can, in principle, drive the whole watch — no
+second radio, no separate BLE stack to reverse first.
 
 ## Plan of attack
 
@@ -68,20 +103,28 @@ this.
       real `Request` captured from OHealth will show it).
 - [x] Get the Play Store build of `com.heytap.health.international`
       (`.apks` bundle) and check it.
-- [ ] Decompile with jadx; grep for `MessageClient`, `DataClient`,
-      `sendMessage(`, `PutDataRequest.create(` and `/` path literals.
-      Write each path and payload format into the table below.
-- [ ] Find the BLE side: grep for `BluetoothGatt`, `UUID.fromString`, and
-      the BES / "heytap wearable" SDK classes. Record service and
-      characteristic UUIDs.
+- [x] Scan the APK for the Wear OS surface with
+      `python3 tools/apk_wear_scan.py OHealth.apks` → listener services, the
+      six `/heytap/*` tunnel paths, `com.op.proto` message names, and the
+      companion setup steps. Captured in [ohealth-scan.md](ohealth-scan.md).
+- [ ] Decompile `base.apk` with jadx and read the `com.op.proto` message
+      classes to recover each message's **field numbers and types**, then
+      model the handshake set (`DeviceInfo`, `ConnectResult`,
+      `CapabilityHand`/`CapabilityPass`, `StartSetting`, `SyncOOBEState`) in
+      `core/`. Payloads ride the `/heytap/watch/*` and `/heytap/phone/*` paths.
+- [ ] Confirmed there is no separate BLE service to reverse first — OnePlus
+      rides the Data Layer. Revisit only if a capture shows otherwise.
 
 ### Phase C — sniff a real session (needs Android phone + watch)
 - [ ] Enable *Developer options › Enable Bluetooth HCI snoop log* on the
       Android phone, pair/sync with OHealth, pull the log with
       `adb bugreport`, open in Wireshark.
-- [ ] Load `wear_dissector.lua` from wearos-research for the RFCOMM side.
-- [ ] Note which traffic is RFCOMM (Google) vs BLE GATT (OPPO), and what
-      happens when the watch switches between smart mode and full mode.
+- [ ] Load `wear_dissector.lua` from wearos-research for the RFCOMM framing,
+      then read the reassembled `RootMessage`s: the `rpcRequest`/`setDataItem`
+      on `/heytap/watch/*` carry the `com.op.proto` payloads to match against
+      Phase B's field layouts.
+- [ ] Capture one full OHealth setup to see the companion step order and
+      which signing-digest encoding the watch checks.
 
 ### Phase D — impersonate the phone (needs the Callback or any Sailfish/Linux box)
 - [ ] Unpair the Android phone *without* resetting the watch (the watch
@@ -90,23 +133,31 @@ this.
       watch the log for the watch's `Connect`.
 - [ ] Send notifications using OHealth's identity + paths from Phase B.
 
-## Data Layer paths (fill in from Phase B/C)
+## Data Layer paths
+
+OnePlus tunnel (payloads are `com.op.proto` messages):
 
 | Direction | Path | Payload | Meaning |
 |---|---|---|---|
-| | | | |
+| phone → watch | `/heytap/watch/message` | com.op.proto | MessageClient RPCs |
+| phone → watch | `/heytap/watch/data` | com.op.proto | DataItem sync |
+| phone → watch | `/heytap/watch/ctrl` | com.op.proto | control/handshake |
+| watch → phone | `/heytap/phone/message` | com.op.proto | MessageClient RPCs |
+| watch → phone | `/heytap/phone/data` | com.op.proto | DataItem sync |
+| watch → phone | `/heytap/phone/ctrl` | com.op.proto | control/handshake |
 
-## BLE services (fill in from Phase B/C)
-
-| Service UUID | Characteristic | Notes |
-|---|---|---|
-| | | |
+Standard Google companion paths also seen (handled by the Wear Companion
+Library, not OnePlus-specific): `/call/rpc/*` (telecom bridging),
+`/companion_unpaired/{rpc,ack}` (unpair), `/contacts3/node_migration_done`
+and `/data/MigrateActivity` (phone switching). Full list in
+[ohealth-scan.md](ohealth-scan.md).
 
 ## Open questions
 
 - Exact Bluetooth name the watch advertises (WearOut assumes it starts with
   "OnePlus Watch 4").
+- Field layout of each `com.op.proto` message (needs jadx or a capture).
 - Does the watch accept a new phone without a factory reset?
-- Is the Google account copy mandatory, or can OxygenOS Watch skip it?
-- Does the RTOS side need to be "bound" to the phone with an OPPO account
-  token before it will deliver notifications?
+- Is the Google account copy (`GoogleAccountsSetupStep`) mandatory, or can it
+  be skipped for a watch that only needs notifications/health?
+- Which signing-digest encoding the watch enforces on `Request`.
