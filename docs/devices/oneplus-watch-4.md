@@ -57,12 +57,13 @@ this.
       | Key | Where seen | SHA-1 hex |
       |---|---|---|
       | New (rotated) — default | Google Play bundle, v3.1 block | `030ac13604c0782011aa95a18bda33dc93a94f7f` |
-      | Original | earlier APK, v3 block | `b58d9a4ce294abe1ab8e577d20233122b1a49199` |
+      | Original | Play bundle v3 + v2 blocks (and earlier APK) | `b58d9a4ce294abe1ab8e577d20233122b1a49199` |
 
       Android 13+ reports the rotated key as the app's signer, and phones that
       pair a Watch 4 run Android 13+, so WearOut tries it first.
-- [ ] Re-run the updated tool on the Play bundle to confirm its v3 block
-      holds the original key (same app, rotated), not a third certificate.
+- [x] Re-run the updated tool on the Play bundle: its v3 and v2 blocks
+      hold the original key `b58d9a4c…` and its v3.1 block the new key
+      `030ac136…`. Confirmed rotation of one app's key, no third certificate.
 - [ ] Confirm which key the watch checks, and in which encoding (the first
       real `Request` captured from OHealth will show it).
 - [x] Get the Play Store build of `com.heytap.health.international`
