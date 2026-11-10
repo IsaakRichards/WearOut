@@ -157,6 +157,16 @@ def decode_cmd(cli: str, bin_path: str, verbose: bool = True):
     return cmd
 
 
+def logcat_clear_cmd(adb: str):
+    return [adb, "logcat", "-c"]
+
+
+def logcat_cmd(adb: str):
+    """Stream the phone's logcat with timestamps; the GUI redirects it to a
+    file. Filtering is left to decode time so nothing relevant is dropped."""
+    return [adb, "logcat", "-v", "time"]
+
+
 # --------------------------------------------------------------------------
 # GUI (Tkinter imported lazily so the helpers import without a display)
 # --------------------------------------------------------------------------
@@ -193,10 +203,23 @@ def run_gui():  # pragma: no cover - needs a display
             self.endpoints = []          # ranked (ch, src, dst, n)
             self.msgq = queue.Queue()
             self.step = 0
+            self.logcat_proc = None
+            self.logcat_path = None
+            self.saved = []              # files written into workdir
 
             self._build()
+            self.protocol("WM_DELETE_WINDOW", self._on_close)
             self.after(100, self._drain_log)
             self._show_step()
+
+        def _on_close(self):
+            self._stop_logcat()
+            self.destroy()
+
+        def _note_saved(self, path):
+            if path and path not in self.saved:
+                self.saved.append(path)
+                self._log("saved " + path)
 
         # ---- layout ----
         def _build(self):
@@ -349,13 +372,65 @@ def run_gui():  # pragma: no cover - needs a display
                 "  • open OHealth and let it sync\n"
                 "  • send yourself a notification and watch it arrive\n"
                 "  • press 'find my phone'\n\n"
-                "Keep it short (about 20 seconds). The snoop log is already "
-                "recording in the background; there is nothing to start here."
+                "The Bluetooth snoop log records on its own. Start the clear-text "
+                "logcat here so you capture the paths alongside the bytes:"
             )).pack(anchor="w")
+            b = ttk.Frame(self.body)
+            b.pack(anchor="w", pady=8)
+            self.logcat_start_btn = ttk.Button(b, text="● Start logcat", command=self._start_logcat)
+            self.logcat_start_btn.grid(row=0, column=0, padx=(0, 6))
+            self.logcat_stop_btn = ttk.Button(b, text="■ Stop logcat", command=self._stop_logcat,
+                                              state="normal" if self.logcat_proc else "disabled")
+            self.logcat_stop_btn.grid(row=0, column=1)
+            self.logcat_status = ttk.Label(self.body, foreground="#555",
+                                           text="logcat: running" if self.logcat_proc else "logcat: not running")
+            self.logcat_status.pack(anchor="w")
             ttk.Label(self.body, foreground="#555", wraplength=560, text=(
-                "Tip: capture the pairing / first sync first — that handshake "
-                "is the most valuable thing to model."
+                "Suggested order: Start logcat → do the watch activity → Stop "
+                "logcat → go to the next step and retrieve the snoop log. For a "
+                "fresh-watch pairing, see docs/capturing.md (one shot per reset)."
             )).pack(anchor="w", pady=8)
+
+        def _start_logcat(self):
+            if self.logcat_proc:
+                return
+            if not self.adb:
+                self._log("! adb not found; cannot capture logcat")
+                return
+            os.makedirs(self.workdir, exist_ok=True)
+            self.logcat_path = os.path.join(self.workdir, "logcat.txt")
+            try:
+                subprocess.run(logcat_clear_cmd(self.adb), timeout=15)
+            except (OSError, subprocess.SubprocessError) as e:
+                self._log(f"! logcat -c failed: {e}")
+            try:
+                f = open(self.logcat_path, "w")
+                self.logcat_proc = subprocess.Popen(logcat_cmd(self.adb), stdout=f,
+                                                    stderr=subprocess.STDOUT, text=True)
+            except OSError as e:
+                self._log(f"! cannot start logcat: {e}")
+                self.logcat_proc = None
+                return
+            self._log("logcat recording to " + self.logcat_path)
+            if hasattr(self, "logcat_status"):
+                self.logcat_status.configure(text="logcat: running")
+                self.logcat_stop_btn.configure(state="normal")
+                self.logcat_start_btn.configure(state="disabled")
+
+        def _stop_logcat(self):
+            if not self.logcat_proc:
+                return
+            try:
+                self.logcat_proc.terminate()
+                self.logcat_proc.wait(timeout=5)
+            except (OSError, subprocess.SubprocessError):
+                pass
+            self.logcat_proc = None
+            self._note_saved(self.logcat_path)
+            if hasattr(self, "logcat_status") and self.logcat_status.winfo_exists():
+                self.logcat_status.configure(text="logcat: stopped")
+                self.logcat_stop_btn.configure(state="disabled")
+                self.logcat_start_btn.configure(state="normal")
 
         # ---- step 4: retrieve ----
         def _step_retrieve(self):
@@ -374,6 +449,8 @@ def run_gui():  # pragma: no cover - needs a display
 
         def _set_btsnoop(self, path):
             self.btsnoop = path
+            if path:
+                self._note_saved(path)
             msg = f"Loaded: {path}" if path else "Could not find a btsnoop log."
             self.retrieve_status.configure(text=msg,
                                            foreground="#1a7f37" if path else "#b00020")
@@ -386,6 +463,7 @@ def run_gui():  # pragma: no cover - needs a display
                 if rc != 0 or not os.path.exists(zpath):
                     self._set_btsnoop(None)
                     return
+                self._note_saved(zpath)
                 dest = extract_btsnoop(zpath, self.workdir)
                 if dest:
                     self._log(f"Extracted {dest}")
@@ -442,9 +520,12 @@ def run_gui():  # pragma: no cover - needs a display
             ), wraplength=560).pack(anchor="w")
             ttk.Button(self.body, text="Export + decode",
                        command=self._export_and_decode).pack(anchor="w", pady=6)
-            self.decode_out = scrolledtext.ScrolledText(self.body, height=14,
+            self.decode_out = scrolledtext.ScrolledText(self.body, height=12,
                                                         font=("monospace", 9), wrap="word")
             self.decode_out.pack(fill="both", expand=True)
+            self.saved_label = ttk.Label(self.body, foreground="#555", justify="left")
+            self.saved_label.pack(anchor="w", pady=(8, 0))
+            self._refresh_saved()
 
         def _selected_endpoint(self):
             try:
@@ -469,18 +550,28 @@ def run_gui():  # pragma: no cover - needs a display
                 data = hexfields_to_bytes(out)
                 with open(binp, "wb") as f:
                     f.write(data)
+                self._note_saved(binp)
                 self._log(f"wrote {len(data)} bytes to {binp}")
                 if not data:
                     self._log("! no payload on this channel/direction; try another row")
                     return
-                self._run(decode_cmd(self.cli, binp), on_done=self._show_decode)
+                decoded_txt = binp + ".decoded.txt"
+                self._run(decode_cmd(self.cli, binp), save_stdout=decoded_txt,
+                          on_done=lambda rc, o: self._show_decode(rc, o, decoded_txt))
 
-            self._run(export_cmd(self.tshark, self.btsnoop, ch, src, dst),
-                      save_stdout=None, on_done=exported)
+            self._run(export_cmd(self.tshark, self.btsnoop, ch, src, dst), on_done=exported)
 
-        def _show_decode(self, _rc, out):
+        def _show_decode(self, _rc, out, saved_path=None):
             self.decode_out.insert("end", out)
             self.decode_out.see("end")
+            if saved_path:
+                self._note_saved(saved_path)
+            self._refresh_saved()
+
+        def _refresh_saved(self):
+            if hasattr(self, "saved_label") and self.saved_label.winfo_exists():
+                names = "\n".join("  • " + os.path.basename(p) for p in self.saved) or "  (none yet)"
+                self.saved_label.configure(text=f"Saved in {self.workdir}:\n{names}")
 
     Wizard().mainloop()
 

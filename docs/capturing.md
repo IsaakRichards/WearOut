@@ -2,8 +2,12 @@
 
 > **In a hurry? Use the wizard.** `python3 tools/capture_wizard.py` opens a
 > click-through GUI that does everything on this page: checks your tools,
-> helps you enable the snoop log, retrieves `btsnoop_hci.log`, finds the
-> WearableBt channel, and decodes each direction. The manual steps below are
+> helps you enable the snoop log, records `adb logcat` while you reproduce,
+> retrieves `btsnoop_hci.log` via `adb bugreport`, finds the WearableBt
+> channel, and exports + decodes each direction. It saves everything into a
+> `wearout-capture/` folder (`bugreport.zip`, `btsnoop_hci.log`, `logcat.txt`,
+> the per-direction `*.bin`, and `*.decoded.txt`) and lists them on the last
+> step. Enabling the snoop toggle is the only manual part. The steps below are
 > the reference it follows.
 
 The watch and the Android phone talk over Bluetooth **RFCOMM** (the

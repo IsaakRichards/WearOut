@@ -67,6 +67,10 @@ class CmdTest(unittest.TestCase):
         self.assertEqual(cmd[:3], ["tshark", "-r", "f.log"])
         self.assertIn("btrfcomm", cmd)
 
+    def test_logcat_cmds(self):
+        self.assertEqual(cw.logcat_clear_cmd("adb"), ["adb", "logcat", "-c"])
+        self.assertEqual(cw.logcat_cmd("adb"), ["adb", "logcat", "-v", "time"])
+
 
 class ZipTest(unittest.TestCase):
     def _zip(self, path, names):
