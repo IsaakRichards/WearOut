@@ -93,6 +93,18 @@ class ApkIdentityTest(unittest.TestCase):
         self.assertEqual(scheme, "v1")
         self.assertEqual(got, der)
 
+    def test_apks_bundle(self):
+        cert = b"\x30\x82bundle-cert"
+        base = insert_v2_block(make_zip({"AndroidManifest.xml": b"x"}), cert, scheme_id=0xF05368C0)
+        split = make_zip({"AndroidManifest.xml": b"split"})  # unsigned on purpose
+        for ext in (".apks", ".xapk", ".apkm"):
+            bundle = make_zip({"split_config.arm64_v8a.apk": split, "base.apk": base,
+                               "manifest.json": b"{}"})
+            scheme, got = apk_identity.signing_cert(self.write("o" + ext, bundle))
+            self.assertEqual(got, cert)
+            self.assertIn("base.apk", scheme)
+            self.assertTrue(scheme.startswith("v3"))
+
     def test_not_zip(self):
         with self.assertRaises(apk_identity.ApkError):
             apk_identity.signing_cert(self.write("d.apk", b"nope"))

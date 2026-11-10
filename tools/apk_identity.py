@@ -9,6 +9,7 @@ certificate. To talk to the OnePlus Watch 4's OHealth watch app, WearOut has
 to present OHealth's identity, so we need the digest of OHealth's cert.
 
     python3 tools/apk_identity.py OHealth.apk
+    python3 tools/apk_identity.py OHealth.apks   # also .xapk / .apkm bundles
 
 Reads APK Signature Scheme v3.1/v3/v2 blocks directly (stdlib only). Falls
 back to the v1 META-INF/*.RSA|DSA|EC PKCS#7 via the `openssl` binary.
@@ -99,7 +100,47 @@ def _cert_from_v1(path: str) -> bytes:
     return base64.b64decode(b64)
 
 
+BUNDLE_EXTS = (".apks", ".xapk", ".apkm")
+
+
+def _bundle_members(path: str):
+    """Return the .apk entries if `path` is a split-APK bundle, else None.
+
+    Bundles (.apks from SAI/bundletool/Aurora, .xapk from APKPure, .apkm from
+    APKMirror) are plain zips with base.apk + split_*.apk inside. All splits
+    of one app carry the same signing cert, so base.apk is enough.
+    """
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = [n for n in z.namelist() if n.lower().endswith(".apk")]
+    except zipfile.BadZipFile:
+        return None
+    if not names:
+        return None
+    # A real APK never contains other .apk files at its root, but check the
+    # extension too so an odd APK with an embedded asset isn't misread.
+    if not path.lower().endswith(BUNDLE_EXTS) and "AndroidManifest.xml" in _zip_names(path):
+        return None
+    names.sort(key=lambda n: (0 if n.rsplit("/", 1)[-1] == "base.apk" else 1, n))
+    return names
+
+
+def _zip_names(path: str):
+    with zipfile.ZipFile(path) as z:
+        return set(z.namelist())
+
+
 def signing_cert(path: str):
+    members = _bundle_members(path)
+    if members:
+        with zipfile.ZipFile(path) as z:
+            inner = z.read(members[0])
+        with tempfile.NamedTemporaryFile(suffix=".apk") as f:
+            f.write(inner)
+            f.flush()
+            scheme, cert = signing_cert(f.name)
+        return f"{scheme} ({members[0]} in bundle)", cert
+
     with open(path, "rb") as f:
         data = f.read()
     pairs = _signing_block(data)
@@ -126,7 +167,7 @@ def main(argv):
         return 2
     try:
         scheme, cert = signing_cert(argv[1])
-    except (ApkError, OSError, struct.error, subprocess.CalledProcessError) as e:
+    except (ApkError, OSError, struct.error, zipfile.BadZipFile, subprocess.CalledProcessError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
     d = digests(cert)
