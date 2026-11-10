@@ -11,6 +11,18 @@ Sailfish daemon.
 > tested; the Sailfish daemon and UI are scaffolded but have not yet run on
 > a device. No watch has been paired yet. See [the roadmap](#roadmap).
 
+## Target devices
+
+WearOut is being built first for one watch and one phone:
+
+| | Device | Notes |
+|---|---|---|
+| ⌚ | **OnePlus Watch 4** | Wear OS 6 + an RTOS co-processor; set up by OHealth. [Dossier](docs/devices/oneplus-watch-4.md) |
+| 📱 | **Commodore Callback 8020** | Sailfish OS keypad flip phone, 480×640 screen. [Dossier](docs/devices/commodore-callback-8020.md) |
+
+Other Wear OS watches use the same Google transport and should work as a
+side effect, without the OnePlus-specific extras.
+
 ## Why this is hard (and why it might work)
 
 Sailfish's Android App Support cannot open Bluetooth connections to
@@ -31,12 +43,13 @@ core/            portable C++17 protocol core (no Qt, no libprotobuf)
   messages       RootMessage / Connect / SyncStart / SetDataItem / Request / MessagePiece
   framing        length-prefixed pieces, multi-piece reassembly, SHA-1 digest checks
   session        phone-side state machine: handshake, sync, heartbeat, messages
+tools/apk_identity.py  signing-cert digest of an APK (who the watch trusts)
 tools/cli/       wearout-cli: talk to the Wear OS emulator over TCP, MITM proxy, fake watch
 tests/           unit + loopback tests for the core
 sailfish/        wearoutd (Qt5, BlueZ Profile1 RFCOMM) + Silica UI + systemd user unit
 rpm/             Sailfish SDK spec
 proto/           reference .proto schema (from microG, Apache-2.0)
-docs/            protocol notes
+docs/            protocol notes, docs/devices/ per-device dossiers
 ```
 
 ## Building the core and CLI (any Linux)
@@ -94,7 +107,10 @@ Amazfish.
 - [x] Protocol core: framing, pieces, digest, Connect/SyncStart/DataItem/Message
 - [x] CLI: emulator client, MITM proxy, fake watch
 - [x] Sailfish daemon + UI scaffold, BlueZ RFCOMM via `ProfileManager1`
+- [x] Device profiles (OnePlus Watch 4), paired-watch discovery, keypad-first UI for the Callback
+- [x] `tools/apk_identity.py`: extract OHealth's signing digest
 - [ ] **Run the CLI against a real Wear OS emulator; record and fix the handshake**
+- [ ] OnePlus Watch 4: OHealth Data Layer paths, then its BLE/RTOS link (see dossier)
 - [ ] Capture a full companion setup with the proxy; document every message
 - [ ] First build + run of `wearoutd` on a device
 - [ ] Notifications: mirror Sailfish (lipstick) notifications to the watch

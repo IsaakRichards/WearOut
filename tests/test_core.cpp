@@ -1,5 +1,6 @@
 // SPDX-License-Identifier: Apache-2.0
 // Dependency-free unit tests for the WearOut protocol core.
+#include "wearout/devices.h"
 #include "wearout/framing.h"
 #include "wearout/messages.h"
 #include "wearout/protobuf.h"
@@ -289,7 +290,21 @@ static void testVersionRejection() {
     CHECK(err.find("99") != std::string::npos);
 }
 
+static void testDeviceMatching() {
+    const WatchProfile *p = matchWatch("OnePlus Watch 4 A1B2");
+    CHECK(p && p->id == "oneplus-watch-4");
+    CHECK(p && p->dualEngine);
+    CHECK(p && p->companion.packageName == "com.heytap.health.international");
+    p = matchWatch("oneplus watch 4");
+    CHECK(p && p->id == "oneplus-watch-4");
+    p = matchWatch("Pixel Watch 3 1234");
+    CHECK(p && p->id == "wear-os-generic");
+    CHECK(matchWatch("OnePlus Buds Pro 3") == nullptr);
+    CHECK(matchWatch("") == nullptr);
+}
+
 int main() {
+    testDeviceMatching();
     testSha1();
     testVarints();
     testConnectRoundTrip();

@@ -14,6 +14,7 @@ add_library(wearout_core STATIC
     core/src/messages.cpp
     core/src/framing.cpp
     core/src/session.cpp
+    core/src/devices.cpp
 )
 target_include_directories(wearout_core PUBLIC core/include)
 set_target_properties(wearout_core PROPERTIES POSITION_INDEPENDENT_CODE ON)
@@ -31,6 +32,10 @@ if(WEAROUT_BUILD_TESTS)
     add_executable(wearout_tests tests/test_core.cpp)
     target_link_libraries(wearout_tests PRIVATE wearout_core)
     add_test(NAME core COMMAND wearout_tests)
+    find_package(Python3 COMPONENTS Interpreter)
+    if(Python3_FOUND)
+        add_test(NAME apk_identity COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_apk_identity.py)
+    endif()
 endif()
 
 if(WEAROUT_BUILD_SAILFISH)

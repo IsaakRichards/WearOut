@@ -1,7 +1,11 @@
 // SPDX-License-Identifier: Apache-2.0
 #include "daemon.h"
 
+#include "wearout/devices.h"
+
 #include <QDBusConnection>
+#include <QDBusMetaType>
+#include <QDBusReply>
 #include <QDebug>
 
 #include <netdb.h>
@@ -23,6 +27,9 @@ Daemon::Daemon(QObject *parent)
 
 bool Daemon::start()
 {
+    qDBusRegisterMetaType<BluezInterfaces>();
+    qDBusRegisterMetaType<BluezManagedObjects>();
+
     m_wearableBt = new BluezProfile(kWearableBtUuid, BluezProfile::Client,
                                     QStringLiteral("/org/wearout/profile/wearablebt"), this);
     connect(m_wearableBt, &BluezProfile::error, this, &Daemon::log);
@@ -42,9 +49,15 @@ bool Daemon::start()
     bus.registerObject(QStringLiteral("/org/wearout/Daemon"), this,
                        QDBusConnection::ExportScriptableSlots | QDBusConnection::ExportScriptableSignals);
 
-    const QString saved = watchAddress();
-    if (!saved.isEmpty())
-        connectWatch(saved);
+    QString target = watchAddress();
+    if (target.isEmpty()) {
+        // First run: pick the first paired watch we recognise.
+        const QStringList found = findWatches();
+        if (!found.isEmpty())
+            target = found.first().section(QLatin1Char('|'), 0, 0);
+    }
+    if (!target.isEmpty())
+        connectWatch(target);
     return true;
 }
 
@@ -97,8 +110,43 @@ void Daemon::attach(int fd)
     setState(m_link->stateName());
 }
 
+QStringList Daemon::findWatches() const
+{
+    QStringList out;
+    QDBusInterface om(QStringLiteral("org.bluez"), QStringLiteral("/"),
+                      QStringLiteral("org.freedesktop.DBus.ObjectManager"), QDBusConnection::systemBus());
+    QDBusReply<BluezManagedObjects> reply = om.call(QStringLiteral("GetManagedObjects"));
+    if (!reply.isValid()) {
+        qWarning() << "GetManagedObjects failed:" << reply.error().message();
+        return out;
+    }
+    const BluezManagedObjects objects = reply.value();
+    for (auto it = objects.constBegin(); it != objects.constEnd(); ++it) {
+        const QVariantMap dev = it.value().value(QStringLiteral("org.bluez.Device1"));
+        if (dev.isEmpty() || !dev.value(QStringLiteral("Paired")).toBool())
+            continue;
+        QString name = dev.value(QStringLiteral("Alias")).toString();
+        if (name.isEmpty())
+            name = dev.value(QStringLiteral("Name")).toString();
+        const wearout::WatchProfile *p = wearout::matchWatch(name.toStdString());
+        if (!p)
+            continue;
+        out << QStringLiteral("%1|%2|%3").arg(dev.value(QStringLiteral("Address")).toString(), name,
+                                             QString::fromStdString(p->id));
+    }
+    return out;
+}
+
+QString Daemon::activeProfile() const { return m_profileId; }
+
 void Daemon::connectWatch(const QString &address)
 {
+    m_profileId.clear();
+    for (const QString &w : findWatches()) {
+        if (w.section(QLatin1Char('|'), 0, 0).compare(address, Qt::CaseInsensitive) == 0)
+            m_profileId = w.section(QLatin1Char('|'), 2, 2);
+    }
+    emit log(QStringLiteral("profile: %1").arg(m_profileId.isEmpty() ? QStringLiteral("unknown") : m_profileId));
     m_settings.setValue(QStringLiteral("watchAddress"), address);
     const QString path = BluezProfile::devicePathFor(address);
     emit log(QStringLiteral("connecting WearableBt to %1").arg(path));

@@ -4,9 +4,17 @@
 #include "bluezprofile.h"
 #include "watchlink.h"
 
+#include <QDBusObjectPath>
+#include <QMap>
 #include <QObject>
+#include <QVariantMap>
 #include <QPointer>
 #include <QSettings>
+
+typedef QMap<QString, QVariantMap> BluezInterfaces;
+typedef QMap<QDBusObjectPath, BluezInterfaces> BluezManagedObjects;
+Q_DECLARE_METATYPE(BluezInterfaces)
+Q_DECLARE_METATYPE(BluezManagedObjects)
 
 // Session-bus service org.wearout.daemon at /org/wearout/Daemon, consumed by
 // the Silica UI through Nemo.DBus.
@@ -27,6 +35,10 @@ public slots:
     Q_SCRIPTABLE QString state() const;
     Q_SCRIPTABLE QString watchAddress() const;
     Q_SCRIPTABLE QString peerName() const;
+    // Paired BlueZ devices that match a known watch profile, as
+    // "AA:BB:CC:DD:EE:FF|Bluetooth name|profile-id" strings.
+    Q_SCRIPTABLE QStringList findWatches() const;
+    Q_SCRIPTABLE QString activeProfile() const;
 
 signals:
     Q_SCRIPTABLE void stateChanged(const QString &state);
@@ -44,4 +56,5 @@ private:
     QPointer<WatchLink> m_link;
     QString m_state = QStringLiteral("Disconnected");
     QString m_peerName;
+    QString m_profileId;
 };
