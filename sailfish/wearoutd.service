@@ -1,0 +1,12 @@
+[Unit]
+Description=WearOut Wear OS bridge daemon
+After=lipstick.service
+Requires=dbus.socket
+
+[Service]
+ExecStart=/usr/bin/wearoutd
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=user-session.target

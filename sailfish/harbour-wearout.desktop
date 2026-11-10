@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=WearOut
+Comment=Experimental Wear OS watch bridge
+Icon=harbour-wearout
+Exec=harbour-wearout
+X-Nemo-Application-Type=silica-qt5
+
+[X-Sailjail]
+# The daemon needs the system bus (BlueZ); the UI only talks to the daemon.
+Sandboxing=Disabled

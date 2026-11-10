@@ -1,0 +1,6 @@
+build/
+build-*/
+RPMS/
+*.user
+.vscode/
+.idea/

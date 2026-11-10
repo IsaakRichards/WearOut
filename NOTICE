@@ -1,0 +1,7 @@
+WearOut
+Copyright 2026 IsaakRichards
+
+This product includes software derived from the microG Project
+"wearable" library (https://github.com/microg/wearable),
+Copyright 2015 microG Project Team, licensed under the Apache License 2.0.
+Specifically: proto/wearable.proto and the field layout used in core/.
