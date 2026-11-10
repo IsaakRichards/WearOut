@@ -45,6 +45,7 @@ core/            portable C++17 protocol core (no Qt, no libprotobuf)
   session        phone-side state machine: handshake, sync, heartbeat, messages
 tools/apk_identity.py  signing-cert digest of an APK (who the watch trusts)
 tools/apk_wear_scan.py scan an APK for its Wear OS interop surface (paths, services, protos)
+tools/capture_wizard.py GUI wizard: record watch<->phone traffic and decode it
 tools/cli/       wearout-cli: talk to the Wear OS emulator over TCP, MITM proxy, fake watch
 tests/           unit + loopback tests for the core
 sailfish/        wearoutd (Qt5, BlueZ Profile1 RFCOMM) + Silica UI + systemd user unit
@@ -82,7 +83,13 @@ direction through WearOut's own parser:
 ./build/wearout-cli -v decode watch_to_phone.bin
 ```
 
-See [docs/capturing.md](docs/capturing.md) for how to capture and export it.
+Or run the guided GUI:
+
+```sh
+python3 tools/capture_wizard.py
+```
+
+See [docs/capturing.md](docs/capturing.md) for how to capture and export it by hand.
 
 ### Capturing a real phone ↔ watch session
 

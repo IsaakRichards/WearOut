@@ -1,5 +1,11 @@
 # Capturing real watch ↔ phone traffic
 
+> **In a hurry? Use the wizard.** `python3 tools/capture_wizard.py` opens a
+> click-through GUI that does everything on this page: checks your tools,
+> helps you enable the snoop log, retrieves `btsnoop_hci.log`, finds the
+> WearableBt channel, and decodes each direction. The manual steps below are
+> the reference it follows.
+
 The watch and the Android phone talk over Bluetooth **RFCOMM** (the
 "WearableBt" channel), carrying the length-prefixed protobuf WearOut
 implements. Recording it is how we turn the APK scan's *guesses* into

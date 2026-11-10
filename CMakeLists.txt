@@ -36,6 +36,7 @@ if(WEAROUT_BUILD_TESTS)
     find_package(Python3 COMPONENTS Interpreter)
     if(Python3_FOUND)
         add_test(NAME apk_identity COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_apk_identity.py)
+        add_test(NAME capture_wizard COMMAND Python3::Interpreter ${CMAKE_CURRENT_SOURCE_DIR}/tests/test_capture_wizard.py)
     endif()
 endif()
 
