@@ -50,16 +50,23 @@ this.
 
 ### Phase B — learn OHealth's identity and paths (no watch needed)
 - [x] Download the OHealth APK and run
-      `python3 tools/apk_identity.py OHealth.apk` → package + cert digest.
-      Result (v3 signing scheme):
-      - SHA-1 hex `b58d9a4ce294abe1ab8e577d20233122b1a49199` (used by default)
-      - SHA-1 base64url `tY2aTOKUq-Grjld9ICMxIrGkkZk`
-      - SHA-256 hex `38bd2bbfa86127bd03c11195b507321358fe2ba116c54a16c713b91e39fa393e`
-- [ ] Confirm which of those encodings the watch checks (first real
-      `Request` captured from OHealth will show it).
-- [ ] Confirm the APK was the Play Store build of
-      `com.heytap.health.international` (a regional build may be signed
-      differently).
+      `python3 tools/apk_identity.py OHealth.apks` → package + cert digest.
+      OHealth uses **signing-key rotation** (APK Signature Scheme v3.1), so
+      it has two certificates:
+
+      | Key | Where seen | SHA-1 hex |
+      |---|---|---|
+      | New (rotated) — default | Google Play bundle, v3.1 block | `030ac13604c0782011aa95a18bda33dc93a94f7f` |
+      | Original | earlier APK, v3 block | `b58d9a4ce294abe1ab8e577d20233122b1a49199` |
+
+      Android 13+ reports the rotated key as the app's signer, and phones that
+      pair a Watch 4 run Android 13+, so WearOut tries it first.
+- [ ] Re-run the updated tool on the Play bundle to confirm its v3 block
+      holds the original key (same app, rotated), not a third certificate.
+- [ ] Confirm which key the watch checks, and in which encoding (the first
+      real `Request` captured from OHealth will show it).
+- [x] Get the Play Store build of `com.heytap.health.international`
+      (`.apks` bundle) and check it.
 - [ ] Decompile with jadx; grep for `MessageClient`, `DataClient`,
       `sendMessage(`, `PutDataRequest.create(` and `/` path literals.
       Write each path and payload format into the table below.

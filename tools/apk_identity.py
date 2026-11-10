@@ -130,7 +130,13 @@ def _zip_names(path: str):
         return set(z.namelist())
 
 
-def signing_cert(path: str):
+def signing_certs(path: str):
+    """All (scheme, cert) pairs, newest scheme first.
+
+    An APK can carry several signature blocks. With key rotation (Android
+    13+), the v3.1 block holds the *new* key and the v3/v2 blocks hold the
+    *original* key for older devices, so they may differ.
+    """
     members = _bundle_members(path)
     if members:
         with zipfile.ZipFile(path) as z:
@@ -138,17 +144,25 @@ def signing_cert(path: str):
         with tempfile.NamedTemporaryFile(suffix=".apk") as f:
             f.write(inner)
             f.flush()
-            scheme, cert = signing_cert(f.name)
-        return f"{scheme} ({members[0]} in bundle)", cert
+            found = signing_certs(f.name)
+        return [(f"{scheme} ({members[0]} in bundle)", cert) for scheme, cert in found]
 
     with open(path, "rb") as f:
         data = f.read()
     pairs = _signing_block(data)
+    out = []
     if pairs:
         for scheme_id, name in SCHEMES.items():
             if scheme_id in pairs:
-                return name, _first_cert_from_scheme(pairs[scheme_id])
-    return "v1", _cert_from_v1(path)
+                out.append((name, _first_cert_from_scheme(pairs[scheme_id])))
+    if not out:
+        out.append(("v1", _cert_from_v1(path)))
+    return out
+
+
+def signing_cert(path: str):
+    """The cert a current Android device would treat as the app's signer."""
+    return signing_certs(path)[0]
 
 
 def digests(cert: bytes) -> dict:
@@ -166,16 +180,27 @@ def main(argv):
         print(__doc__.strip(), file=sys.stderr)
         return 2
     try:
-        scheme, cert = signing_cert(argv[1])
+        found = signing_certs(argv[1])
     except (ApkError, OSError, struct.error, zipfile.BadZipFile, subprocess.CalledProcessError) as e:
         print(f"error: {e}", file=sys.stderr)
         return 1
-    d = digests(cert)
-    print(f"scheme      {scheme}")
-    print(f"sha1 hex    {d['sha1_hex']}")
-    print(f"sha1 b64url {d['sha1_b64url']}")
-    print(f"sha256 hex  {d['sha256_hex']}")
-    print()
+
+    seen = {}
+    for scheme, cert in found:
+        d = digests(cert)
+        seen.setdefault(d["sha1_hex"], []).append(scheme)
+        print(f"scheme      {scheme}")
+        print(f"sha1 hex    {d['sha1_hex']}")
+        print(f"sha1 b64url {d['sha1_b64url']}")
+        print(f"sha256 hex  {d['sha256_hex']}")
+        print()
+
+    if len(seen) > 1:
+        print("NOTE: the signature blocks use different certificates. This is")
+        print("signing-key rotation: the first block (newest scheme) is the key")
+        print("Android 13+ reports; the others are the original key kept for")
+        print("older devices.")
+        print()
     print("Which form the watch expects in Request.signatureDigest is not yet")
     print("confirmed; microG uses lowercase SHA-1 hex. Try that first.")
     return 0

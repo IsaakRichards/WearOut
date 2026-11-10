@@ -17,6 +17,9 @@ namespace wearout {
 struct AppIdentity {
     std::string packageName;     // phone-side package the watch app trusts
     std::string signatureDigest; // SHA-1 of that package's signing cert (see tools/apk_identity.py)
+    // Other certs the same app has been signed with (key rotation). Which
+    // one the watch checks is unconfirmed, so these are fallbacks to try.
+    std::vector<std::string> alternateDigests;
 };
 
 struct WatchProfile {

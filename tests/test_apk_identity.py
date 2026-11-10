@@ -28,13 +28,18 @@ def make_zip(files: dict) -> bytes:
     return buf.getvalue()
 
 
-def insert_v2_block(zip_bytes: bytes, cert: bytes, scheme_id=0x7109871A) -> bytes:
-    eocd = zip_bytes.rfind(b"PK\x05\x06")
-    cd_off = struct.unpack_from("<I", zip_bytes, eocd + 16)[0]
+def _pair(cert: bytes, scheme_id: int) -> bytes:
     signed_data = lp(b"") + lp(lp(cert)) + lp(b"")          # digests, certs, attrs
     signer = lp(signed_data) + lp(b"") + lp(b"pubkey")         # signed data, sigs, key
     value = lp(lp(signer))
-    pair = struct.pack("<QI", len(value) + 4, scheme_id) + value
+    return struct.pack("<QI", len(value) + 4, scheme_id) + value
+
+
+def insert_v2_block(zip_bytes: bytes, cert: bytes, scheme_id=0x7109871A, extra=()) -> bytes:
+    """extra: further (cert, scheme_id) pairs to put in the same block."""
+    eocd = zip_bytes.rfind(b"PK\x05\x06")
+    cd_off = struct.unpack_from("<I", zip_bytes, eocd + 16)[0]
+    pair = _pair(cert, scheme_id) + b"".join(_pair(c, i) for c, i in extra)
     size = len(pair) + 24
     block = struct.pack("<Q", size) + pair + struct.pack("<Q", size) + apk_identity.APK_SIG_MAGIC
     out = bytearray(zip_bytes[:cd_off] + block + zip_bytes[cd_off:])
@@ -104,6 +109,13 @@ class ApkIdentityTest(unittest.TestCase):
             self.assertEqual(got, cert)
             self.assertIn("base.apk", scheme)
             self.assertTrue(scheme.startswith("v3"))
+
+    def test_key_rotation_lists_all_blocks(self):
+        apk = insert_v2_block(make_zip({"AndroidManifest.xml": b"x"}), b"original", scheme_id=0xF05368C0,
+                              extra=[(b"rotated", 0x1B93AD61)])
+        found = apk_identity.signing_certs(self.write("r.apk", apk))
+        self.assertEqual(found, [("v3.1", b"rotated"), ("v3", b"original")])
+        self.assertEqual(apk_identity.signing_cert(os.path.join(self.tmp, "r.apk")), ("v3.1", b"rotated"))
 
     def test_not_zip(self):
         with self.assertRaises(apk_identity.ApkError):
