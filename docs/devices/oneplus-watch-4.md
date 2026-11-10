@@ -49,9 +49,17 @@ the watch up with OHealth, and leave it set up. Everything below assumes
 this.
 
 ### Phase B — learn OHealth's identity and paths (no watch needed)
-- [ ] Download the OHealth APK and run
+- [x] Download the OHealth APK and run
       `python3 tools/apk_identity.py OHealth.apk` → package + cert digest.
-      Fill `op4.companion.signatureDigest` in `core/src/devices.cpp`.
+      Result (v3 signing scheme):
+      - SHA-1 hex `b58d9a4ce294abe1ab8e577d20233122b1a49199` (used by default)
+      - SHA-1 base64url `tY2aTOKUq-Grjld9ICMxIrGkkZk`
+      - SHA-256 hex `38bd2bbfa86127bd03c11195b507321358fe2ba116c54a16c713b91e39fa393e`
+- [ ] Confirm which of those encodings the watch checks (first real
+      `Request` captured from OHealth will show it).
+- [ ] Confirm the APK was the Play Store build of
+      `com.heytap.health.international` (a regional build may be signed
+      differently).
 - [ ] Decompile with jadx; grep for `MessageClient`, `DataClient`,
       `sendMessage(`, `PutDataRequest.create(` and `/` path literals.
       Write each path and payload format into the table below.

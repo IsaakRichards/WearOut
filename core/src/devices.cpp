@@ -25,8 +25,14 @@ const std::vector<WatchProfile> &knownWatches() {
         op4.btNamePrefixes = {"OnePlus Watch 4"};
         op4.dualEngine = true; // confirmed: Snapdragon W5 + BES2800
         // Confirmed from OnePlus' Watch 3 FAQ: setup is done by OHealth from
-        // Google Play. Assumed identical for Watch 4. Digest still unknown.
-        op4.companion = {"com.heytap.health.international", ""};
+        // Google Play. Assumed identical for Watch 4.
+        // Signing cert of the OHealth APK (v3 scheme), via tools/apk_identity.py:
+        //   sha1 hex    b58d9a4ce294abe1ab8e577d20233122b1a49199
+        //   sha1 b64url tY2aTOKUq-Grjld9ICMxIrGkkZk
+        //   sha256 hex  38bd2bbfa86127bd03c11195b507321358fe2ba116c54a16c713b91e39fa393e
+        // Which encoding the watch checks is unconfirmed; lowercase SHA-1 hex
+        // follows microG and is tried first.
+        op4.companion = {"com.heytap.health.international", "b58d9a4ce294abe1ab8e577d20233122b1a49199"};
         v.push_back(op4);
 
         // Generic fallback for any other Wear OS watch. Kept last.

@@ -198,7 +198,20 @@ void Daemon::sendMessage(const QString &path, const QString &text, const QString
         emit log(QStringLiteral("not connected"));
         return;
     }
-    m_link->sendMessage(path, text.toUtf8(), package, signatureDigest);
+    // Empty package/digest = speak as the active profile's companion app
+    // (OHealth for the OnePlus Watch 4).
+    QString pkg = package, digest = signatureDigest;
+    if (pkg.isEmpty() || digest.isEmpty()) {
+        for (const auto &p : wearout::knownWatches()) {
+            if (QString::fromStdString(p.id) != m_profileId)
+                continue;
+            if (pkg.isEmpty())
+                pkg = QString::fromStdString(p.companion.packageName);
+            if (digest.isEmpty())
+                digest = QString::fromStdString(p.companion.signatureDigest);
+        }
+    }
+    m_link->sendMessage(path, text.toUtf8(), pkg, digest);
 }
 
 QString Daemon::state() const { return m_state; }

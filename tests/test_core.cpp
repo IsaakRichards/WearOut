@@ -295,6 +295,7 @@ static void testDeviceMatching() {
     CHECK(p && p->id == "oneplus-watch-4");
     CHECK(p && p->dualEngine);
     CHECK(p && p->companion.packageName == "com.heytap.health.international");
+    CHECK(p && p->companion.signatureDigest.size() == 40);
     p = matchWatch("oneplus watch 4");
     CHECK(p && p->id == "oneplus-watch-4");
     p = matchWatch("Pixel Watch 3 1234");
