@@ -167,6 +167,93 @@ def logcat_cmd(adb: str):
     return [adb, "logcat", "-v", "time"]
 
 
+OHEALTH_PKG = "com.heytap.health.international"
+
+
+def device_info_cmds(adb: str, package: str = OHEALTH_PKG):
+    """(label, cmd) pairs whose output describes the phone and the companion
+    app, for correlating a capture with a device + software version."""
+    return [
+        ("phone properties", [adb, "shell", "getprop"]),
+        ("companion app version",
+         [adb, "shell", "dumpsys package %s | grep -iE 'versionName|versionCode|firstInstallTime|lastUpdateTime'" % package]),
+        ("bonded bluetooth devices",
+         [adb, "shell", "dumpsys bluetooth_manager | grep -iE 'Bonded|BondedDevices|name:|address' | head -40"]),
+    ]
+
+
+# Patterns for the optional best-effort redaction of text artifacts.
+_EMAIL = re.compile(r"[\w.+-]+@[\w-]+\.[\w.-]+")
+_LONGNUM = re.compile(r"\d{7,}")
+REDACTABLE_EXT = (".txt", ".md", ".log.txt")
+
+
+def redact_text(s: str) -> str:
+    """Mask the obvious personal identifiers (emails, long digit runs) in a
+    text artifact. Best effort only, and never applied to binary captures."""
+    s = _EMAIL.sub("[email]", s)
+    s = _LONGNUM.sub("[number]", s)
+    return s
+
+
+def is_text_artifact(name: str) -> bool:
+    low = name.lower()
+    if low.endswith(".bin") or low == "btsnoop_hci.log" or low.endswith(".zip"):
+        return False
+    return low.endswith((".txt", ".md")) or "decoded" in low or "logcat" in low
+
+
+def files_to_package(workdir: str):
+    """Artifacts to include in the send-zip: everything in workdir except the
+    bulky bugreport archive and any previously built package."""
+    out = []
+    try:
+        names = sorted(os.listdir(workdir))
+    except OSError:
+        return out
+    for n in names:
+        p = os.path.join(workdir, n)
+        if not os.path.isfile(p):
+            continue
+        low = n.lower()
+        if low.endswith(".zip"):          # bugreport.zip or a prior package
+            continue
+        out.append(n)
+    return out
+
+
+def package_zip_path(parent_dir: str, when=None):
+    import datetime
+    ts = (when or datetime.datetime.now()).strftime("%Y%m%d-%H%M%S")
+    return os.path.join(parent_dir, "wearout-capture-%s.zip" % ts)
+
+
+def build_manifest(files, meta: dict):
+    """Markdown describing the package contents and environment."""
+    lines = ["# WearOut capture package", ""]
+    for k in ("generated", "tool", "phone", "companion"):
+        if meta.get(k):
+            lines.append("- **%s:** %s" % (k, meta[k]))
+    lines += ["", "## Files", ""]
+    for name, size in files:
+        lines.append("- `%s` (%d bytes)" % (name, size))
+    lines += [
+        "",
+        "## What each file is",
+        "- `btsnoop_hci.log` — raw Bluetooth HCI capture from the phone.",
+        "- `*.bin` — one direction of the WearableBt RFCOMM payload, reassembled.",
+        "- `*.decoded.txt` — that payload decoded by `wearout-cli decode`.",
+        "- `logcat.txt` — the phone's log during the capture (paths, node ids).",
+        "- `device_info.txt` — phone properties and companion-app version.",
+        "",
+        "## Note",
+        "This capture can contain personal data (notification text, account ids,",
+        "health readings). The raw `btsnoop`/`.bin` files are NOT redacted.",
+        "Review before sharing beyond a trusted recipient.",
+    ]
+    return "\n".join(lines) + "\n"
+
+
 # --------------------------------------------------------------------------
 # GUI (Tkinter imported lazily so the helpers import without a display)
 # --------------------------------------------------------------------------
@@ -178,6 +265,7 @@ STEPS = [
     ("Retrieve log", "Pull btsnoop_hci.log from the phone."),
     ("Pick channel", "Find the WearableBt channel and the watch."),
     ("Decode", "Export each direction and decode it."),
+    ("Package", "Collect device info and zip everything to send."),
 ]
 
 
@@ -315,7 +403,8 @@ def run_gui():  # pragma: no cover - needs a display
             self.next_btn.configure(state="normal")
             self._clear_body()
             [self._step_tools, self._step_enable, self._step_reproduce,
-             self._step_retrieve, self._step_channel, self._step_decode][self.step]()
+             self._step_retrieve, self._step_channel, self._step_decode,
+             self._step_package][self.step]()
 
         def _back(self):
             if self.step:
@@ -560,6 +649,116 @@ def run_gui():  # pragma: no cover - needs a display
                           on_done=lambda rc, o: self._show_decode(rc, o, decoded_txt))
 
             self._run(export_cmd(self.tshark, self.btsnoop, ch, src, dst), on_done=exported)
+
+        # ---- step 7: package ----
+        def _step_package(self):
+            ttk.Label(self.body, wraplength=560, justify="left", text=(
+                "Collect the phone's device info, then bundle everything in the "
+                "working folder into one zip you can attach to the chat."
+            )).pack(anchor="w")
+
+            self.redact_var = tk.BooleanVar(value=False)
+            ttk.Checkbutton(self.body, variable=self.redact_var,
+                            text="Best-effort redact emails/long numbers in text files "
+                                 "(not the raw captures)").pack(anchor="w", pady=6)
+
+            self.pkg_list = tk.Listbox(self.body, height=8, font=("monospace", 9))
+            self.pkg_list.pack(fill="both", expand=True, pady=4)
+            self._refresh_pkg_list()
+
+            row = ttk.Frame(self.body)
+            row.pack(anchor="w", pady=6)
+            ttk.Button(row, text="Refresh list", command=self._refresh_pkg_list).grid(row=0, column=0, padx=(0, 6))
+            ttk.Button(row, text="Collect info + build zip",
+                       command=self._collect_and_package).grid(row=0, column=1)
+            self.pkg_status = ttk.Label(self.body, foreground="#555", wraplength=560,
+                                        text="Nothing packaged yet.")
+            self.pkg_status.pack(anchor="w", pady=(6, 0))
+
+        def _refresh_pkg_list(self):
+            if not (hasattr(self, "pkg_list") and self.pkg_list.winfo_exists()):
+                return
+            self.pkg_list.delete(0, "end")
+            names = files_to_package(self.workdir)
+            if not names:
+                self.pkg_list.insert("end", "(working folder is empty)")
+            for n in names:
+                try:
+                    sz = os.path.getsize(os.path.join(self.workdir, n))
+                except OSError:
+                    sz = 0
+                self.pkg_list.insert("end", f"{n}  ({sz} bytes)")
+
+        def _collect_and_package(self):
+            import datetime
+            self.pkg_status.configure(text="Collecting device info and building zip…")
+
+            def work():
+                # 1. device info (best effort; skip if no adb)
+                if self.adb:
+                    info_path = os.path.join(self.workdir, "device_info.txt")
+                    try:
+                        with open(info_path, "w") as f:
+                            for label, cmd in device_info_cmds(self.adb):
+                                f.write(f"==== {label} ====\n")
+                                try:
+                                    r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+                                    f.write(r.stdout or "")
+                                    if r.stderr:
+                                        f.write("[stderr] " + r.stderr)
+                                except (OSError, subprocess.SubprocessError) as e:
+                                    f.write(f"[failed: {e}]\n")
+                                f.write("\n")
+                        self.after(0, lambda: self._note_saved(info_path))
+                    except OSError as e:
+                        self.after(0, lambda: self._log(f"! device info failed: {e}"))
+
+                # 2. manifest + zip
+                names = files_to_package(self.workdir)
+                sized = [(n, os.path.getsize(os.path.join(self.workdir, n))) for n in names]
+                meta = {
+                    "generated": datetime.datetime.now().isoformat(timespec="seconds"),
+                    "tool": "WearOut capture wizard",
+                }
+                manifest = build_manifest(sized, meta)
+                man_path = os.path.join(self.workdir, "MANIFEST.md")
+                try:
+                    with open(man_path, "w") as f:
+                        f.write(manifest)
+                except OSError:
+                    pass
+
+                redact = bool(self.redact_var.get())
+                parent = os.path.dirname(os.path.abspath(self.workdir)) or "."
+                zpath = package_zip_path(parent)
+                top = "wearout-capture"
+                try:
+                    import zipfile as _zip
+                    with _zip.ZipFile(zpath, "w", _zip.ZIP_DEFLATED) as z:
+                        # MANIFEST.md was just written into workdir, so
+                        # files_to_package already includes it.
+                        for n in files_to_package(self.workdir):
+                            src = os.path.join(self.workdir, n)
+                            if not os.path.isfile(src):
+                                continue
+                            arc = f"{top}/{n}"
+                            if redact and is_text_artifact(n):
+                                with open(src, "r", errors="replace") as fh:
+                                    z.writestr(arc, redact_text(fh.read()))
+                            else:
+                                z.write(src, arc)
+                    size = os.path.getsize(zpath)
+                    msg = f"Built {zpath}  ({size} bytes). Attach this to the chat."
+                except OSError as e:
+                    zpath, msg = None, f"Could not build zip: {e}"
+
+                def done():
+                    self._log(msg)
+                    self.pkg_status.configure(text=msg,
+                                              foreground="#1a7f37" if zpath else "#b00020")
+                self.after(0, done)
+
+            threading.Thread(target=work, daemon=True).start()
 
         def _show_decode(self, _rc, out, saved_path=None):
             self.decode_out.insert("end", out)

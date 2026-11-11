@@ -4,11 +4,14 @@
 > click-through GUI that does everything on this page: checks your tools,
 > helps you enable the snoop log, records `adb logcat` while you reproduce,
 > retrieves `btsnoop_hci.log` via `adb bugreport`, finds the WearableBt
-> channel, and exports + decodes each direction. It saves everything into a
-> `wearout-capture/` folder (`bugreport.zip`, `btsnoop_hci.log`, `logcat.txt`,
-> the per-direction `*.bin`, and `*.decoded.txt`) and lists them on the last
-> step. Enabling the snoop toggle is the only manual part. The steps below are
-> the reference it follows.
+> channel, exports + decodes each direction, collects the phone's device info,
+> and zips everything into one `wearout-capture-<timestamp>.zip` ready to send.
+> It saves the pieces into a `wearout-capture/` folder (`btsnoop_hci.log`,
+> `logcat.txt`, the per-direction `*.bin`, `*.decoded.txt`, `device_info.txt`,
+> `MANIFEST.md`) and bundles them on the final step, with an optional
+> best-effort redaction of emails/long numbers in the text files. Enabling the
+> snoop toggle is the only manual part. The steps below are the reference it
+> follows.
 
 The watch and the Android phone talk over Bluetooth **RFCOMM** (the
 "WearableBt" channel), carrying the length-prefixed protobuf WearOut
