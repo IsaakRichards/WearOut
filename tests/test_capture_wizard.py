@@ -46,6 +46,22 @@ class EndpointTest(unittest.TestCase):
         self.assertEqual(ranked, [(3, "aa", "bb", 1)])
 
 
+class PrereqTest(unittest.TestCase):
+    def test_host_system(self):
+        self.assertIn(cw.host_system(), ("linux", "mac", "windows"))
+
+    def test_linux_pkg_manager(self):
+        self.assertEqual(cw.linux_pkg_manager(which_fn=lambda m: "/usr/bin/" + m if m == "dnf" else None), "dnf")
+        self.assertIsNone(cw.linux_pkg_manager(which_fn=lambda m: None))
+
+    def test_install_command(self):
+        self.assertEqual(cw.install_command("adb", "linux", "apt"), "sudo apt install -y android-tools-adb")
+        self.assertEqual(cw.install_command("tshark", "mac"), "brew install wireshark")
+        self.assertIn("winget", cw.install_command("adb", "windows"))
+        self.assertIsNone(cw.install_command("adb", "linux", None))
+        self.assertIsNone(cw.install_command("nonesuch", "mac"))
+
+
 class CmdTest(unittest.TestCase):
     def test_export_cmd_direction(self):
         cmd = cw.export_cmd("tshark", "f.log", 3, src="aa:bb", dst="cc:dd")

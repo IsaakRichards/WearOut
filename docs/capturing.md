@@ -1,7 +1,9 @@
 # Capturing real watch ↔ phone traffic
 
 > **In a hurry? Use the wizard.** `python3 tools/capture_wizard.py` opens a
-> click-through GUI that does everything on this page: checks your tools,
+> click-through GUI that does everything on this page: checks your tools
+> (adb, tshark, cmake, wearout-cli) and offers to install or build any that are
+> missing,
 > helps you enable the snoop log, records `adb logcat` while you reproduce,
 > retrieves `btsnoop_hci.log` via `adb bugreport`, finds the WearableBt
 > channel, exports + decodes each direction, collects the phone's device info,

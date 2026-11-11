@@ -22,6 +22,7 @@ The non-GUI helpers below are pure and unit-tested (tests/test_capture_wizard.py
 import os
 import re
 import shutil
+import sys
 import zipfile
 
 
@@ -30,6 +31,78 @@ import zipfile
 # --------------------------------------------------------------------------
 
 REQUIRED_TOOLS = ("adb", "tshark")
+
+
+def host_system():
+    """'windows', 'mac', or 'linux' (default)."""
+    if sys.platform.startswith("win"):
+        return "windows"
+    if sys.platform == "darwin":
+        return "mac"
+    return "linux"
+
+
+def linux_pkg_manager(which_fn=None):
+    """Name of the first package manager found, or None."""
+    wf = which_fn or shutil.which
+    for mgr in ("apt", "dnf", "pacman", "zypper"):
+        if wf(mgr):
+            return mgr
+    return None
+
+
+# Install commands per tool. Linux is keyed by package manager; mac uses
+# Homebrew, Windows uses winget. 'python3-tk' matters only when the GUI itself
+# can't start, but is listed for completeness.
+INSTALL = {
+    "adb": {
+        "apt": "sudo apt install -y android-tools-adb",
+        "dnf": "sudo dnf install -y android-tools",
+        "pacman": "sudo pacman -S --noconfirm android-tools",
+        "zypper": "sudo zypper install -y android-tools",
+        "mac": "brew install android-platform-tools",
+        "windows": "winget install --id Google.PlatformTools -e",
+    },
+    "tshark": {
+        "apt": "sudo apt install -y tshark",
+        "dnf": "sudo dnf install -y wireshark-cli",
+        "pacman": "sudo pacman -S --noconfirm wireshark-cli",
+        "zypper": "sudo zypper install -y wireshark",
+        "mac": "brew install wireshark",
+        "windows": "winget install --id WiresharkFoundation.Wireshark -e",
+    },
+    "cmake": {
+        "apt": "sudo apt install -y build-essential cmake",
+        "dnf": "sudo dnf install -y gcc-c++ cmake",
+        "pacman": "sudo pacman -S --noconfirm base-devel cmake",
+        "zypper": "sudo zypper install -y gcc-c++ cmake",
+        "mac": "xcode-select --install ; brew install cmake",
+        "windows": "winget install --id Kitware.CMake -e",
+    },
+    "python3-tk": {
+        "apt": "sudo apt install -y python3-tk",
+        "dnf": "sudo dnf install -y python3-tkinter",
+        "pacman": "sudo pacman -S --noconfirm tk",
+        "zypper": "sudo zypper install -y python3-tk",
+        "mac": "brew install python-tk",
+        "windows": "",
+    },
+}
+
+
+def install_command(tool, system=None, pkg=None):
+    """The shell command to install `tool` on this platform, or None.
+
+    On Linux `pkg` is the package manager from linux_pkg_manager(); on mac and
+    Windows it is ignored.
+    """
+    spec = INSTALL.get(tool)
+    if not spec:
+        return None
+    system = system or host_system()
+    if system == "linux":
+        return spec.get(pkg) if pkg else None
+    return spec.get(system) or None
 
 
 def which(tool: str):
@@ -271,6 +344,7 @@ STEPS = [
 
 def run_gui():  # pragma: no cover - needs a display
     import queue
+    import shlex
     import subprocess
     import threading
     import tkinter as tk
@@ -419,19 +493,59 @@ def run_gui():  # pragma: no cover - needs a display
         # ---- step 1: tools ----
         def _step_tools(self):
             os.makedirs(self.workdir, exist_ok=True)
-            grid = ttk.Frame(self.body)
-            grid.pack(anchor="w", pady=4)
-            rows = [("adb", self.adb), ("tshark", self.tshark), ("wearout-cli", self.cli)]
-            for r, (name, path) in enumerate(rows):
+            system = host_system()
+            pkg = linux_pkg_manager() if system == "linux" else None
+
+            # (label, path, kind)  kind: 'package' installs; 'build' builds the CLI
+            rows = [
+                ("adb", self.adb, "package"),
+                ("tshark", self.tshark, "package"),
+                ("cmake", which("cmake"), "package"),
+                ("wearout-cli", self.cli, "build"),
+            ]
+            missing = 0
+            for name, path, kind in rows:
                 ok = bool(path)
-                ttk.Label(grid, text=("✓" if ok else "✗") + " " + name,
-                          foreground="#1a7f37" if ok else "#b00020",
-                          width=16).grid(row=r, column=0, sticky="w")
-                ttk.Label(grid, text=path or "not found on PATH").grid(row=r, column=1, sticky="w")
+                if not ok:
+                    missing += 1
+                row = ttk.Frame(self.body)
+                row.pack(fill="x", anchor="w", pady=2)
+                ttk.Label(row, text=("✓" if ok else "✗") + " " + name,
+                          foreground="#1a7f37" if ok else "#b00020", width=14).pack(side="left")
+                ttk.Label(row, text=path or "not found").pack(side="left")
+                if ok:
+                    continue
+                if kind == "build":
+                    ttk.Button(row, text="Build now", command=self._build_cli).pack(side="right")
+                    continue
+                cmd = install_command(name, system, pkg)
+                if cmd:
+                    ttk.Button(row, text="Install", command=lambda c=cmd: self._try_install(c)).pack(side="right")
+                    ttk.Button(row, text="Copy", command=lambda c=cmd: self._copy(c)).pack(side="right", padx=4)
+                else:
+                    ttk.Label(row, text="(no auto-install here)", foreground="#555").pack(side="right")
+
+            if missing:
+                cmds = [install_command(n, system, pkg) for n, p, k in rows if not p and k == "package"]
+                cmds = [c for c in cmds if c]
+                if cmds:
+                    box = scrolledtext.ScrolledText(self.body, height=max(2, len(cmds)),
+                                                    font=("monospace", 9), wrap="none")
+                    box.pack(fill="x", pady=(8, 0))
+                    box.insert("end", "\n".join(cmds))
+                    box.configure(state="disabled")
+                    if pkg is None and system == "linux":
+                        ttk.Label(self.body, foreground="#b00020", wraplength=560,
+                                  text="No known package manager found; install these by hand.").pack(anchor="w")
+            else:
+                ttk.Label(self.body, foreground="#1a7f37",
+                          text="All set — continue to the next step.").pack(anchor="w", pady=(8, 0))
+
             ttk.Label(self.body, wraplength=560, foreground="#555", text=(
-                "adb comes with Android platform-tools; tshark with Wireshark; "
-                "wearout-cli is built from this repo (cmake --build build). "
-                "Set WEAROUT_WEAROUT_CLI / WEAROUT_TSHARK to override a path."
+                f"Platform: {system}" + (f" ({pkg})" if pkg else "") +
+                ". adb ships with Android platform-tools; tshark with Wireshark; "
+                "wearout-cli builds from this repo. Override a path with "
+                "WEAROUT_TSHARK / WEAROUT_ADB / WEAROUT_WEAROUT_CLI."
             )).pack(anchor="w", pady=8)
             ttk.Button(self.body, text="Re-check", command=self._recheck_tools).pack(anchor="w")
             ttk.Label(self.body, text=f"Working folder: {self.workdir}",
@@ -440,6 +554,40 @@ def run_gui():  # pragma: no cover - needs a display
         def _recheck_tools(self):
             self.tshark, self.adb, self.cli = which("tshark"), which("adb"), find_wearout_cli()
             self._show_step()
+
+        def _copy(self, text):
+            self.clipboard_clear()
+            self.clipboard_append(text)
+            self._log("copied to clipboard: " + text)
+
+        def _shell_run(self, shell_cmd, on_done=None):
+            runner = ["cmd", "/c", shell_cmd] if host_system() == "windows" else ["bash", "-lc", shell_cmd]
+            self._run(runner, on_done=on_done)
+
+        def _try_install(self, cmd):
+            if host_system() == "linux" and cmd.startswith("sudo "):
+                if which("pkexec"):
+                    cmd = "pkexec " + cmd[len("sudo "):]
+                else:
+                    self._copy(cmd)
+                    self._log("No graphical sudo (pkexec) found. The command is copied — "
+                              "run it in a terminal, then press Re-check:\n  " + cmd)
+                    return
+            self._log("Installing… (a password prompt may appear)")
+            self._shell_run(cmd, on_done=lambda rc, o: self._recheck_tools())
+
+        def _build_cli(self):
+            if host_system() == "windows":
+                self._log("Build wearout-cli with: cmake -S . -B build && cmake --build build")
+                return
+            here = os.path.dirname(os.path.abspath(__file__))
+            repo = os.path.dirname(here)
+            self._log("Building wearout-cli…")
+            self._shell_run(
+                "cmake -S %s -B %s && cmake --build %s -j" % (shlex.quote(repo),
+                                                             shlex.quote(os.path.join(repo, "build")),
+                                                             shlex.quote(os.path.join(repo, "build"))),
+                on_done=lambda rc, o: self._recheck_tools())
 
         # ---- step 2: enable logging ----
         def _step_enable(self):
